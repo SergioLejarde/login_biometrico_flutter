@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:local_auth/local_auth.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:local_auth/local_auth.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -40,19 +42,60 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _loginManual() async {
-    final user = userCtrl.text;
-    final pass = passCtrl.text;
+    final user = userCtrl.text.trim();
+    final pass = passCtrl.text.trim();
 
-    if (user == 'admin' && pass == '1234') {
-      Navigator.pushReplacementNamed(context, '/enable-biometric');
-    } else {
+    final url = Uri.parse('http://192.168.1.12:1802/login');
+
+    try {
+      final response = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'usuario': user, 'clave': pass}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final token = data['token'];
+
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('token', token);
+
+        if (!mounted) return;
+
+        final isBiometricEnabled = prefs.getBool('biometric_enabled') ?? false;
+
+        if (isBiometricEnabled) {
+          Navigator.pushReplacementNamed(context, '/home');
+        } else {
+          Navigator.pushReplacementNamed(context, '/enable-biometric');
+        }
+      } else {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Usuario o clave incorrectos')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Usuario o clave incorrectos')),
+        const SnackBar(content: Text('Error de conexión al servidor')),
       );
     }
   }
 
   void _loginWithBiometrics() async {
+    final prefs = await SharedPreferences.getInstance();
+    final isEnabled = prefs.getBool('biometric_enabled') ?? false;
+
+    if (!isEnabled) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Primero debes iniciar sesión con usuario y contraseña')),
+      );
+      return;
+    }
+
     final isAvailable = await auth.canCheckBiometrics;
     if (!mounted) return;
 
